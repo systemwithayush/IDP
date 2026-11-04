@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{SERVICE_NAME}}
+  namespace: {{K8S_NAMESPACE}}
+  labels:
+    app: {{SERVICE_NAME}}
+spec:
+  replicas: {{REPLICAS}}
+  selector:
+    matchLabels:
+      app: {{SERVICE_NAME}}
+  template:
+    metadata:
+      labels:
+        app: {{SERVICE_NAME}}
+    spec:
+      containers:
+      - name: {{SERVICE_NAME}}
+        image: {{IMAGE_REPO}}:{{IMAGE_TAG}}
+        ports:
+        - containerPort: 3000
+        envFrom:
+        - configMapRef:
+            name: {{SERVICE_NAME}}-config
+        - secretRef:
+            name: {{SERVICE_NAME}}-secret
+            optional: true
+        resources:
+          requests:
+            cpu: "{{CPU_REQUEST_M}}m"
+            memory: "{{MEMORY_REQUEST_MB}}Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{SERVICE_NAME}}
+  namespace: {{K8S_NAMESPACE}}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{SERVICE_NAME}}
+  ports:
+  - port: 80
+    targetPort: 3000
+

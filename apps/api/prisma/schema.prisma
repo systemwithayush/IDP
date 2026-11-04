@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  lead
+  developer
+}
+
+enum EnvironmentType {
+  dev
+  staging
+  prod
+}
+
+enum DeploymentStatus {
+  requested
+  building
+  pushed
+  applying
+  rolling_out
+  succeeded
+  failed
+  rolled_back
+}
+
+enum RecommendationStatus {
+  pending
+  approved
+  rejected
+}
+
+model Team {
+  id             String          @id @default(uuid())
+  name           String          @unique
+  slug           String          @unique
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  users          User[]
+  resourceQuota  ResourceQuota?
+  services       Service[]
+
+  @@map("teams")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  teamId       String   @map("team_id")
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(developer)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  team         Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  services     Service[]
+  deployments  Deployment[]
+  reviews      AIRecommendation[]
+  auditLogs    AuditLog[]
+
+  @@index([teamId])
+  @@map("users")
+}
+
+model ResourceQuota {
+  id                String   @id @default(uuid())
+  teamId            String   @unique @map("team_id")
+  maxCpuMillicores  Int      @map("max_cpu_millicores")
+  maxMemoryMb       Int      @map("max_memory_mb")
+  maxServices       Int      @map("max_services")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  team              Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("resource_quotas")
+}
+
+model GoldenPathTemplate {
+  id             String    @id @default(uuid())
+  name           String
+  stack          String
+  dockerfileTpl  String    @db.Text @map("dockerfile_tpl")
+  k8sManifestTpl String    @db.Text @map("k8s_manifest_tpl")
+  terraformTpl   String    @db.Text @map("terraform_tpl")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  services       Service[]
+
+  @@map("golden_path_templates")
+}
+
+model Service {
+  id                 String              @id @default(uuid())
+  teamId             String              @map("team_id")
+  ownerId            String              @map("owner_id")
+  templateId         String?             @map("template_id")
+  name               String              @unique
+  stack              String
+  repoUrl            String              @map("repo_url")
+  imageRepo          String              @map("image_repo")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  team               Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  owner              User                @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  template           GoldenPathTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  environments       Environment[]
+  deployments        Deployment[]
+  aiRecommendations  AIRecommendation[]
+  terraformModules   TerraformModule[]
+
+  @@index([teamId])
+  @@index([ownerId])
+  @@index([templateId])
+  @@map("services")
+}
+
+model Environment {
+  id              String          @id @default(uuid())
+  serviceId       String          @map("service_id")
+  type            EnvironmentType
+  k8sNamespace    String          @map("k8s_namespace")
+  replicas        Int             @default(1)
+  cpuRequestM     Int             @default(100) @map("cpu_request_m")
+  memoryRequestMb Int             @default(128) @map("memory_request_mb")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  service         Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  envVariables    EnvVariable[]
+  deployments     Deployment[]
+
+  @@unique([serviceId, type])
+  @@index([serviceId])
+  @@map("environments")
+}
+
+model EnvVariable {
+  id             String      @id @default(uuid())
+  environmentId  String      @map("environment_id")
+  key            String
+  valueEncrypted Bytes       @map("value_encrypted")
+  iv             Bytes       @map("iv")
+  isSecret       Boolean     @default(false) @map("is_secret")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  environment    Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  @@unique([environmentId, key])
+  @@index([environmentId])
+  @@map("env_variables")
+}
+
+model Deployment {
+  id            String           @id @default(uuid())
+  serviceId     String           @map("service_id")
+  environmentId String           @map("environment_id")
+  triggeredBy   String           @map("triggered_by")
+  rollbackOfId  String?          @map("rollback_of_id")
+  imageTag      String           @map("image_tag")
+  gitSha        String           @map("git_sha")
+  correlationId String           @unique @map("correlation_id")
+  status        DeploymentStatus @default(requested)
+  startedAt     DateTime?        @map("started_at")
+  finishedAt    DateTime?        @map("finished_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  service       Service          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  environment   Environment      @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  user          User             @relation(fields: [triggeredBy], references: [id], onDelete: Restrict)
+  rollbackOf    Deployment?      @relation("RollbackParent", fields: [rollbackOfId], references: [id], onDelete: SetNull)
+  rollbacks     Deployment[]     @relation("RollbackParent")
+
+  events        DeploymentEvent[]
+  pipelineRun   PipelineRun?
+
+  @@index([serviceId])
+  @@index([environmentId])
+  @@index([triggeredBy])
+  @@index([rollbackOfId])
+  @@index([serviceId, createdAt])
+  @@map("deployments")
+}
+
+model DeploymentEvent {
+  id           String     @id @default(uuid())
+  deploymentId String     @map("deployment_id")
+  fromStatus   String     @map("from_status")
+  toStatus     String     @map("to_status")
+  message      String     @db.Text
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@map("deployment_events")
+}
+
+model PipelineRun {
+  id           String     @id @default(uuid())
+  deploymentId String     @unique @map("deployment_id")
+  ghRunId      String     @map("gh_run_id")
+  status       String
+  conclusion   String?
+  runUrl       String     @map("run_url")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@map("pipeline_runs")
+}
+
+model AIRecommendation {
+  id             String               @id @default(uuid())
+  serviceId      String               @map("service_id")
+  reviewedBy     String?              @map("reviewed_by")
+  inputMetrics   Json                 @map("input_metrics")
+  recommendation Json
+  status         RecommendationStatus @default(pending)
+  reviewedAt     DateTime?            @map("reviewed_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  service        Service              @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  reviewer       User?                @relation(fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@index([serviceId])
+  @@index([reviewedBy])
+  @@map("ai_recommendations")
+}
+
+model TerraformModule {
+  id               String   @id @default(uuid())
+  serviceId        String   @map("service_id")
+  hclContent       String   @db.Text @map("hcl_content")
+  validated        Boolean  @default(false)
+  validationOutput String?  @db.Text @map("validation_output")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  service          Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+  @@map("terraform_modules")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@map("audit_log")
+}
+

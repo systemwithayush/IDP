@@ -1,0 +1,56 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Lint, Typecheck & Test
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: idp_db
+          MYSQL_USER: idp_user
+          MYSQL_PASSWORD: idp_password
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Monorepo Typecheck
+        run: npm run typecheck
+
+      - name: Monorepo Lint
+        run: npm run lint
+
+      - name: Run Prisma Generate
+        run: npm run db:generate
+
+      - name: Run Tests with Coverage
+        run: npm test -- --coverage
+        env:
+          DATABASE_URL: "mysql://idp_user:idp_password@localhost:3306/idp_db"
+          JWT_ACCESS_SECRET: "test_secret_for_ci_pipeline_minimum_32_characters_123"
+          JWT_REFRESH_SECRET: "test_refresh_secret_ci_pipeline_minimum_32_chars_123"
+          ENCRYPTION_KEY: "dGhpcy1pcy1hLTMyLWJ5dGUtc2VjcmV0LWtleS1leGFtcGxlIQ=="
+          NODE_ENV: "test"
+

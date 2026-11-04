@@ -1,0 +1,20 @@
+{
+  "name": "@idp/shared",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Shared DTOs, Enums, and Zod Schemas for IDP",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'No lint specified for shared'"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
+
