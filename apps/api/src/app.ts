@@ -16,6 +16,7 @@ import { templatesRouter } from './modules/templates/templates.routes.js';
 import { deploymentsRouter } from './modules/deployments/deployments.routes.js';
 import { webhooksRouter } from './modules/webhooks/webhooks.routes.js';
 import { docsRouter } from './modules/docs/docs.routes.js';
+import { aiRouter } from './modules/ai/ai.routes.js';
 
 export const app = express();
 
@@ -86,6 +87,7 @@ app.use('/api/v1/environments', environmentsRouter);
 app.use('/api/v1/templates', templatesRouter);
 app.use('/api/v1/webhooks', webhooksRouter);
 app.use('/api/v1/deployments', deploymentsRouter);
+app.use('/api/v1', aiRouter);
 
 // 404 Handler
 app.use((req: Request, res: Response) => {

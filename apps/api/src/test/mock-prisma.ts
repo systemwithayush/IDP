@@ -13,6 +13,7 @@ export interface InMemoryStore {
   deploymentEvents: any[];
   pipelineRuns: any[];
   auditLogs: any[];
+  aiRecommendations: any[];
 }
 
 export function createPrismaMock() {
@@ -28,6 +29,7 @@ export function createPrismaMock() {
     deploymentEvents: [],
     pipelineRuns: [],
     auditLogs: [],
+    aiRecommendations: [],
   };
 
   return {
@@ -213,6 +215,11 @@ export function createPrismaMock() {
         store.environments.push(item);
         return item;
       }),
+      update: jest.fn(async ({ where, data }: any) => {
+        const item = store.environments.find(e => e.id === where.id);
+        if (item) Object.assign(item, { ...data, updatedAt: new Date() });
+        return item;
+      }),
     },
 
     envVariable: {
@@ -354,6 +361,48 @@ export function createPrismaMock() {
         const c = store.auditLogs.length;
         store.auditLogs = [];
         return { count: c };
+      }),
+    },
+
+    aIRecommendation: {
+      findUnique: jest.fn(async ({ where }: any) => {
+        const item = store.aiRecommendations.find(r => r.id === where.id);
+        if (!item) return null;
+        return {
+          ...item,
+          service: store.services.find(s => s.id === item.serviceId) || null,
+          reviewer: store.users.find(u => u.id === item.reviewedBy) || null,
+        };
+      }),
+      findMany: jest.fn(async ({ where }: any) => {
+        return store.aiRecommendations.filter(r => {
+          if (where?.serviceId && r.serviceId !== where.serviceId) return false;
+          if (where?.status && r.status !== where.status) return false;
+          return true;
+        }).map(r => ({
+          ...r,
+          service: store.services.find(s => s.id === r.serviceId) || null,
+          reviewer: store.users.find(u => u.id === r.reviewedBy) || null,
+        }));
+      }),
+      create: jest.fn(async ({ data }: any) => {
+        const item = {
+          id: data.id || randomUUID(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          status: 'pending',
+          ...data,
+        };
+        store.aiRecommendations.push(item);
+        return {
+          ...item,
+          service: store.services.find(s => s.id === item.serviceId) || null,
+        };
+      }),
+      update: jest.fn(async ({ where, data }: any) => {
+        const item = store.aiRecommendations.find(r => r.id === where.id);
+        if (item) Object.assign(item, { ...data, updatedAt: new Date() });
+        return item;
       }),
     },
 
