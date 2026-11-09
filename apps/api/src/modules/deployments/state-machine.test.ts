@@ -6,6 +6,14 @@ describe('Deployment State Machine Core (Unit Test Every Transition)', () => {
     expect(transition('requested', 'DISPATCH_CI')).toBe('building');
   });
 
+  it('transitions requested -> applying on APPLY_K8S (direct or pre-built apply)', () => {
+    expect(transition('requested', 'APPLY_K8S')).toBe('applying');
+  });
+
+  it('transitions requested -> pushed on IMAGE_PUSHED', () => {
+    expect(transition('requested', 'IMAGE_PUSHED')).toBe('pushed');
+  });
+
   it('transitions building -> pushed on IMAGE_PUSHED', () => {
     expect(transition('building', 'IMAGE_PUSHED')).toBe('pushed');
   });

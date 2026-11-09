@@ -169,11 +169,11 @@ describe('Deployments & GitHub Actions Integration Tests', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ received: true });
 
-      // Verify deployment transitioned to pushed
+      // Verify deployment progressed through K8s apply and rollout to succeeded
       const updated = await mockPrisma.deployment.findUnique({
         where: { id: createdDeploymentId },
       });
-      expect(updated?.status).toBe('pushed');
+      expect(updated?.status).toBe('succeeded');
     });
 
     it('handles webhook replay idempotently without error', async () => {
@@ -221,11 +221,24 @@ describe('Deployments & GitHub Actions Integration Tests', () => {
     });
 
     it('handles failure workflow_run conclusion by transitioning to failed', async () => {
+      const failCorrId = crypto.randomUUID();
+      const failDep = await mockPrisma.deployment.create({
+        data: {
+          serviceId,
+          environmentId,
+          triggeredBy: devId,
+          imageTag: 'v1.0.0',
+          gitSha: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+          correlationId: failCorrId,
+          status: 'building',
+        },
+      });
+
       const payload = {
         action: 'completed',
         workflow_run: {
           id: 99999999,
-          name: `Deploy [${correlationId}] - main`,
+          name: `Deploy [${failCorrId}] - main`,
           status: 'completed',
           conclusion: 'failure',
           html_url: 'https://github.com/systemwithayush/deployable-service/actions/runs/99999999',
@@ -247,7 +260,7 @@ describe('Deployments & GitHub Actions Integration Tests', () => {
       expect(res.status).toBe(200);
 
       const updated = await mockPrisma.deployment.findUnique({
-        where: { id: createdDeploymentId },
+        where: { id: failDep.id },
       });
       expect(updated?.status).toBe('failed');
     });
@@ -298,6 +311,107 @@ describe('Deployments & GitHub Actions Integration Tests', () => {
 
       expect(res.status).toBe(404);
     });
+
+    it('returns 404 when applying nonexistent deployment', async () => {
+      const res = await request(app)
+        .post('/api/v1/deployments/00000000-0000-0000-0000-000000000000/apply')
+        .set('Authorization', `Bearer ${devToken}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+    });
+  });
+
+  describe('POST /api/v1/deployments/:id/apply & Automated Rollback', () => {
+    it('applies manifests and completes rollout to succeeded', async () => {
+      // Create a new requested deployment
+      const dep = await mockPrisma.deployment.create({
+        data: {
+          serviceId,
+          environmentId,
+          triggeredBy: devId,
+          imageTag: 'v1.1.0',
+          gitSha: 'b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
+          correlationId: 'test-apply-corr-id',
+          status: 'pushed',
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/deployments/${dep.id}/apply`)
+        .set('Authorization', `Bearer ${devToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('succeeded');
+    });
+
+    it('triggers automated rollback when rollout fails due to broken image tag', async () => {
+      // 1. Ensure a stable deployment exists as prior baseline
+      await mockPrisma.deployment.update({
+        where: { id: createdDeploymentId },
+        data: { status: 'succeeded' },
+      });
+
+      // 2. Create broken deployment
+      const brokenDep = await mockPrisma.deployment.create({
+        data: {
+          serviceId,
+          environmentId,
+          triggeredBy: devId,
+          imageTag: 'broken-crashloop-v2',
+          gitSha: 'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+          correlationId: 'broken-corr-id',
+          status: 'pushed',
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/deployments/${brokenDep.id}/apply`)
+        .set('Authorization', `Bearer ${devToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('rolled_back');
+
+      // Verify that auto-rollback created a new deployment targeting the stable image tag
+      const deployments = await mockPrisma.deployment.findMany({
+        where: { serviceId },
+      });
+      const rollbackDep = deployments.find(d => d.rollbackOfId === brokenDep.id);
+      expect(rollbackDep).toBeDefined();
+      expect(rollbackDep?.imageTag).toBe('v1.0.0');
+    });
+
+    it('handles automated rollback gracefully when no prior successful deployment exists', async () => {
+      const newSvc = await mockPrisma.service.create({
+        data: {
+          name: 'lonely-service',
+          stack: 'react-static',
+          repoUrl: 'https://github.com/systemwithayush/lonely-service',
+          imageRepo: 'ghcr.io/systemwithayush/lonely-service',
+          teamId,
+          ownerId: devId,
+        },
+      });
+
+      const lonelyBrokenDep = await mockPrisma.deployment.create({
+        data: {
+          serviceId: newSvc.id,
+          environmentId,
+          triggeredBy: devId,
+          imageTag: 'broken-lonely-v1',
+          gitSha: 'd4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5',
+          correlationId: crypto.randomUUID(),
+          status: 'pushed',
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/deployments/${lonelyBrokenDep.id}/apply`)
+        .set('Authorization', `Bearer ${devToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('rolled_back');
+    });
   });
 
   describe('POST /api/v1/deployments/:id/rollback (Rollback Trigger)', () => {
@@ -309,7 +423,7 @@ describe('Deployments & GitHub Actions Integration Tests', () => {
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty('id');
       expect(res.body.rollbackOfId).toBe(createdDeploymentId);
-      expect(res.body.status).toBe('building');
+      expect(res.body.status).toBe('pushed');
     });
   });
 });

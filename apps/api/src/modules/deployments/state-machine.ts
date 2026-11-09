@@ -48,6 +48,8 @@ export function transition(current: DeploymentStatus, action: DeploymentEventAct
   switch (current) {
     case 'requested':
       if (action === 'DISPATCH_CI') return 'building';
+      if (action === 'APPLY_K8S') return 'applying';
+      if (action === 'IMAGE_PUSHED') return 'pushed';
       break;
 
     case 'building':

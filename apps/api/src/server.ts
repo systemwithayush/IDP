@@ -5,6 +5,7 @@ import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { prisma } from './prisma.js';
 import { setSocketServer } from './socket.js';
+import { authService } from './modules/auth/auth.service.js';
 
 export const server = http.createServer(app);
 
@@ -17,12 +18,52 @@ export const io = new SocketIOServer(server, {
 
 setSocketServer(io);
 
-io.on('connection', (socket) => {
-  logger.info({ socketId: socket.id }, 'Socket.io client connected');
+// Socket Handshake Authentication Middleware
+io.use((socket, next) => {
+  const token =
+    (socket.handshake.auth?.token as string) ||
+    (socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '') as string);
 
-  socket.on('join', (room: string) => {
+  if (!token) {
+    return next(new Error('Authentication error: Token required'));
+  }
+
+  try {
+    const user = authService.verifyAccessToken(token);
+    socket.data.user = user;
+    next();
+  } catch (err: any) {
+    return next(new Error(`Authentication error: ${err.message}`));
+  }
+});
+
+io.on('connection', (socket) => {
+  const user = socket.data.user;
+  logger.info({ socketId: socket.id, user: user?.email }, 'Socket.io client connected with authenticated session');
+
+  socket.on('join', async (room: string) => {
+    // Room-level authorization check for deployment rooms
+    if (room.startsWith('deployment:')) {
+      const deploymentId = room.split(':')[1];
+      const dep = await prisma.deployment.findUnique({
+        where: { id: deploymentId },
+        include: { service: true },
+      });
+
+      if (!dep) {
+        socket.emit('error', { code: 'NOT_FOUND', message: 'Deployment not found' });
+        return;
+      }
+
+      // Check access: platform admins or matching teamId
+      if (user.role !== 'admin' && dep.service.teamId !== user.teamId) {
+        socket.emit('error', { code: 'FORBIDDEN', message: 'Unauthorized room access' });
+        return;
+      }
+    }
+
     socket.join(room);
-    logger.info({ socketId: socket.id, room }, 'Socket joined room');
+    logger.info({ socketId: socket.id, room, user: user?.email }, 'Socket joined authorized room');
   });
 
   socket.on('disconnect', () => {

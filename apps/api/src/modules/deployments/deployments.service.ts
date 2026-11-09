@@ -5,6 +5,9 @@ import { gitHubService } from './github.service.js';
 import { auditService } from '../audit/audit.service.js';
 import { getSocketServer } from '../../socket.js';
 import { logger } from '../../utils/logger.js';
+import { decryptSecret } from '../../utils/crypto.js';
+import { manifestBuilder } from '../k8s/manifest.builder.js';
+import { k8sService } from '../k8s/k8s.service.js';
 
 export interface CreateDeploymentParams {
   serviceId: string;
@@ -93,22 +96,30 @@ export class DeploymentsService {
       correlationId,
     });
 
-    // Trigger GitHub Action dispatch
-    try {
-      const [owner, repo] = this.parseRepoUrl(service.repoUrl);
-      await gitHubService.triggerWorkflowDispatch({
-        owner,
-        repo,
-        correlationId,
-        imageTag: params.imageTag,
-        environment: environment.type,
-      });
+    // Trigger GitHub Action dispatch or skip for rollbacks with existing image
+    if (params.rollbackOfId) {
+      await this.transitionDeployment(
+        deployment.id,
+        'IMAGE_PUSHED',
+        'Using existing image from previous stable release'
+      );
+    } else {
+      try {
+        const [owner, repo] = this.parseRepoUrl(service.repoUrl);
+        await gitHubService.triggerWorkflowDispatch({
+          owner,
+          repo,
+          correlationId,
+          imageTag: params.imageTag,
+          environment: environment.type,
+        });
 
-      // Transition to building
-      await this.transitionDeployment(deployment.id, 'DISPATCH_CI', 'GitHub Actions workflow dispatched');
-    } catch (dispatchError: any) {
-      logger.error({ err: dispatchError }, 'Failed to dispatch CI, failing deployment');
-      await this.transitionDeployment(deployment.id, 'FAIL', `CI dispatch failed: ${dispatchError.message}`);
+        // Transition to building
+        await this.transitionDeployment(deployment.id, 'DISPATCH_CI', 'GitHub Actions workflow dispatched');
+      } catch (dispatchError: any) {
+        logger.error({ err: dispatchError }, 'Failed to dispatch CI, failing deployment');
+        await this.transitionDeployment(deployment.id, 'FAIL', `CI dispatch failed: ${dispatchError.message}`);
+      }
     }
 
     return this.getDeploymentById(deployment.id);
@@ -253,6 +264,14 @@ export class DeploymentsService {
     const rollbackImageTag = previousSuccess ? previousSuccess.imageTag : deployment.imageTag;
     const rollbackGitSha = previousSuccess ? previousSuccess.gitSha : deployment.gitSha;
 
+    if (deployment.status === 'succeeded') {
+      try {
+        await this.transitionDeployment(deployment.id, 'MANUAL_ROLLBACK', 'Manual rollback initiated by user');
+      } catch (err: any) {
+        logger.warn({ err: err.message }, 'Failed transitioning previous deployment to rolled_back');
+      }
+    }
+
     return this.createDeployment({
       serviceId: deployment.serviceId,
       environmentId: deployment.environmentId,
@@ -261,6 +280,166 @@ export class DeploymentsService {
       gitSha: rollbackGitSha,
       rollbackOfId: deployment.id,
     });
+  }
+
+  /**
+   * Generates typed manifests, applies them to Kubernetes, and monitors rollout.
+   */
+  async deployToKubernetes(deploymentId: string) {
+    const deployment = await prisma.deployment.findUnique({
+      where: { id: deploymentId },
+      include: { service: { include: { team: true } }, environment: true },
+    });
+    if (!deployment) return null;
+
+    const variables = await prisma.envVariable.findMany({
+      where: { environmentId: deployment.environmentId },
+    });
+
+    const bundle = manifestBuilder.buildBundle({
+      service: {
+        name: deployment.service.name,
+        imageRepo: deployment.service.imageRepo,
+      },
+      environment: {
+        type: deployment.environment.type,
+        k8sNamespace: deployment.environment.k8sNamespace,
+        replicas: deployment.environment.replicas,
+        cpuRequestM: deployment.environment.cpuRequestM,
+        memoryRequestMb: deployment.environment.memoryRequestMb,
+      },
+      imageTag: deployment.imageTag,
+      variables: variables.map((v: any) => {
+        let plain = '';
+        if (v.valueEncrypted && v.iv) {
+          try {
+            plain = decryptSecret(v.valueEncrypted, v.iv);
+          } catch {
+            plain = '';
+          }
+        } else if (v.value) {
+          plain = v.value;
+        }
+        return {
+          key: v.key,
+          value: plain,
+          isSecret: v.isSecret,
+        };
+      }),
+      teamSlug: deployment.service.team?.slug,
+    });
+
+    // 1. Transition to 'applying'
+    await this.transitionDeployment(
+      deploymentId,
+      'APPLY_K8S',
+      'Generating typed manifests and applying to Kubernetes namespace'
+    );
+
+    try {
+      await k8sService.applyManifestBundle(bundle);
+
+      // 2. Transition to 'rolling_out'
+      await this.transitionDeployment(
+        deploymentId,
+        'PODS_SCHEDULED',
+        'Pods scheduled, streaming logs and watching rollout health'
+      );
+
+      // 3. Stream pod logs to Socket.io room
+      await k8sService.streamPodLogs({
+        deploymentId,
+        namespace: deployment.environment.k8sNamespace,
+        serviceName: deployment.service.name,
+      });
+
+      // 4. Watch rollout
+      const rollout = await k8sService.watchRollout({
+        deploymentId,
+        namespace: deployment.environment.k8sNamespace,
+        deploymentName: deployment.service.name,
+        targetTag: deployment.imageTag,
+      });
+
+      if (rollout.success) {
+        await this.transitionDeployment(
+          deploymentId,
+          'ROLLOUT_PASSED',
+          `Rollout passed: all ${rollout.replicasReady || 1} replica(s) ready`
+        );
+      } else {
+        await this.transitionDeployment(
+          deploymentId,
+          'ROLLOUT_FAILED',
+          `Rollout failed: ${rollout.reason}`
+        );
+        await this.handleRolloutFailure(deployment);
+      }
+    } catch (err: any) {
+      await this.transitionDeployment(
+        deploymentId,
+        'FAIL',
+        `Kubernetes deployment error: ${err.message}`
+      );
+      await this.handleRolloutFailure(deployment);
+    }
+
+    return this.getDeploymentById(deploymentId);
+  }
+
+  /**
+   * Automatic rollback to previous successful deployment on rollout failure.
+   */
+  async handleRolloutFailure(deployment: any) {
+    if (deployment.rollbackOfId) {
+      logger.warn({ deploymentId: deployment.id }, 'Deployment was already a rollback; preventing recursive auto-rollback');
+      return;
+    }
+
+    const previousSuccess = await prisma.deployment.findFirst({
+      where: {
+        serviceId: deployment.serviceId,
+        environmentId: deployment.environmentId,
+        status: 'succeeded',
+        id: { not: deployment.id },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (previousSuccess) {
+      logger.info(
+        { previousId: previousSuccess.id, failedId: deployment.id },
+        'Rollout failed: executing automated rollback to last successful release'
+      );
+
+      await prisma.deploymentEvent.create({
+        data: {
+          deploymentId: deployment.id,
+          fromStatus: 'rolled_back',
+          toStatus: 'rolled_back',
+          message: `Auto-rollback initiated to previous stable release (${previousSuccess.imageTag})`,
+        },
+      });
+
+      const rollbackDeployment = await this.createDeployment({
+        serviceId: deployment.serviceId,
+        environmentId: deployment.environmentId,
+        triggeredBy: deployment.triggeredBy,
+        imageTag: previousSuccess.imageTag,
+        gitSha: previousSuccess.gitSha,
+        rollbackOfId: deployment.id,
+      });
+
+      if (rollbackDeployment) {
+        // Rollback deployment auto-applies
+        await this.deployToKubernetes(rollbackDeployment.id);
+      }
+    } else {
+      logger.warn(
+        { deploymentId: deployment.id },
+        'No prior successful deployment available for automated rollback'
+      );
+    }
   }
 
   /**
@@ -306,6 +485,8 @@ export class DeploymentsService {
           'IMAGE_PUSHED',
           `Image built and pushed to GHCR (Run #${workflowRun.id})`
         );
+        // Automatically progress to Kubernetes deployment and live pod streaming
+        await this.deployToKubernetes(deployment.id);
       }
     } else if (workflowRun.conclusion === 'failure') {
       if (!TERMINAL_STATES.has(deployment.status)) {

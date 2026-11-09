@@ -244,9 +244,11 @@ export function createPrismaMock() {
       findUnique: jest.fn(async ({ where }: any) => {
         const d = store.deployments.find(d => d.id === where.id || d.correlationId === where.correlationId);
         if (!d) return null;
+        const svc = store.services.find(s => s.id === d.serviceId) || null;
+        const serviceWithTeam = svc ? { ...svc, team: store.teams.find(t => t.id === svc.teamId) || null } : null;
         return {
           ...d,
-          service: store.services.find(s => s.id === d.serviceId) || null,
+          service: serviceWithTeam,
           environment: store.environments.find(e => e.id === d.environmentId) || null,
           user: store.users.find(u => u.id === d.triggeredBy) || null,
           events: store.deploymentEvents.filter(ev => ev.deploymentId === d.id),

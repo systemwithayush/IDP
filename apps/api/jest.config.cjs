@@ -14,6 +14,7 @@ module.exports = {
   },
   moduleNameMapper: {
     '^@idp/shared$': '<rootDir>/../../packages/shared/src/index.ts',
+    '^@kubernetes/client-node$': '<rootDir>/src/test/mock-k8s.ts',
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   collectCoverageFrom: [

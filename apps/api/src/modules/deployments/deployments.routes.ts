@@ -51,6 +51,23 @@ deploymentsRouter.get('/:id', async (req: Request, res: Response, next: NextFunc
 });
 
 /**
+ * POST /api/v1/deployments/:id/apply
+ * Applies manifests to Kubernetes and watches rollout
+ */
+deploymentsRouter.post('/:id/apply', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deployment = await deploymentsService.deployToKubernetes(req.params.id);
+    if (!deployment) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Deployment not found' } });
+      return;
+    }
+    res.status(200).json(deployment);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * POST /api/v1/deployments/:id/rollback
  * Trigger rollback targeting previous successful deployment
  */
