@@ -48,3 +48,4 @@ echo ==========================================
 echo  Kind cluster initialized successfully!
 echo  Context: kind-%CLUSTER_NAME%
 echo ==========================================
+

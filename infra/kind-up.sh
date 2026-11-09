@@ -47,3 +47,4 @@ echo " Context: kind-${CLUSTER_NAME}            "
 echo " Namespaces: idp-system, idp-workloads    "
 echo " RBAC: idp-deployer configured            "
 echo "=========================================="
+

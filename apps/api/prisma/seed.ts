@@ -191,25 +191,20 @@ spec:
 
   console.log('✅ Golden path templates created');
 
-  // 4. Users (3 users per role = 9 users)
-  // Shared password hash for test accounts: "Password123!"
-  const passwordHash = await bcrypt.hash('Password123!', 10);
+  // 4. Users
+  // Shared easy password hash for test accounts: "password123"
+  const passwordHash = await bcrypt.hash('password123', 10);
 
   const usersData = [
-    // Admins (3)
-    { email: 'admin1@idp.internal', role: Role.admin, teamId: platformTeam.id },
-    { email: 'admin2@idp.internal', role: Role.admin, teamId: platformTeam.id },
-    { email: 'superadmin@idp.internal', role: Role.admin, teamId: platformTeam.id },
+    // Primary Personas
+    { email: 'divya@idp.internal', name: 'Divya', role: Role.admin, teamId: platformTeam.id },
+    { email: 'deepak@idp.internal', name: 'Deepak', role: Role.lead, teamId: productTeam.id },
+    { email: 'ayush@idp.internal', name: 'Ayush', role: Role.developer, teamId: productTeam.id },
 
-    // Leads (3)
-    { email: 'lead.platform@idp.internal', role: Role.lead, teamId: platformTeam.id },
-    { email: 'lead.payments@idp.internal', role: Role.lead, teamId: productTeam.id },
-    { email: 'lead.infra@idp.internal', role: Role.lead, teamId: platformTeam.id },
-
-    // Developers (3)
-    { email: 'dev.alice@idp.internal', role: Role.developer, teamId: platformTeam.id },
-    { email: 'dev.bob@idp.internal', role: Role.developer, teamId: productTeam.id },
-    { email: 'dev.charlie@idp.internal', role: Role.developer, teamId: productTeam.id },
+    // Additional test users
+    { email: 'admin1@idp.internal', name: 'Admin One', role: Role.admin, teamId: platformTeam.id },
+    { email: 'lead.platform@idp.internal', name: 'Platform Lead', role: Role.lead, teamId: platformTeam.id },
+    { email: 'dev.alice@idp.internal', name: 'Alice Developer', role: Role.developer, teamId: platformTeam.id },
   ];
 
   const createdUsers: Record<string, string> = {};
@@ -235,7 +230,7 @@ spec:
       repoUrl: 'https://github.com/systemwithayush/auth-gateway',
       imageRepo: 'ghcr.io/systemwithayush/auth-gateway',
       teamId: platformTeam.id,
-      ownerId: createdUsers['dev.alice@idp.internal'],
+      ownerId: createdUsers['ayush@idp.internal'] || createdUsers['divya@idp.internal'],
       templateId: expressTpl.id,
     },
   });
@@ -247,7 +242,7 @@ spec:
       repoUrl: 'https://github.com/systemwithayush/payment-processor',
       imageRepo: 'ghcr.io/systemwithayush/payment-processor',
       teamId: productTeam.id,
-      ownerId: createdUsers['dev.bob@idp.internal'],
+      ownerId: createdUsers['deepak@idp.internal'] || createdUsers['ayush@idp.internal'],
       templateId: fastapiTpl.id,
     },
   });
