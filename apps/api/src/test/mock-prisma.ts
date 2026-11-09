@@ -9,6 +9,9 @@ export interface InMemoryStore {
   environments: any[];
   envVariables: any[];
   goldenPathTemplates: any[];
+  deployments: any[];
+  deploymentEvents: any[];
+  pipelineRuns: any[];
   auditLogs: any[];
 }
 
@@ -21,6 +24,9 @@ export function createPrismaMock() {
     environments: [],
     envVariables: [],
     goldenPathTemplates: [],
+    deployments: [],
+    deploymentEvents: [],
+    pipelineRuns: [],
     auditLogs: [],
   };
 
@@ -231,6 +237,86 @@ export function createPrismaMock() {
       findMany: jest.fn(async () => store.goldenPathTemplates),
       findUnique: jest.fn(async ({ where }: any) => {
         return store.goldenPathTemplates.find(t => t.id === where.id) || null;
+      }),
+    },
+
+    deployment: {
+      findUnique: jest.fn(async ({ where }: any) => {
+        const d = store.deployments.find(d => d.id === where.id || d.correlationId === where.correlationId);
+        if (!d) return null;
+        return {
+          ...d,
+          service: store.services.find(s => s.id === d.serviceId) || null,
+          environment: store.environments.find(e => e.id === d.environmentId) || null,
+          user: store.users.find(u => u.id === d.triggeredBy) || null,
+          events: store.deploymentEvents.filter(ev => ev.deploymentId === d.id),
+          pipelineRun: store.pipelineRuns.find(p => p.deploymentId === d.id) || null,
+        };
+      }),
+      findFirst: jest.fn(async ({ where }: any) => {
+        return store.deployments.find(d => {
+          if (where?.serviceId && d.serviceId !== where.serviceId) return false;
+          if (where?.environmentId && d.environmentId !== where.environmentId) return false;
+          if (where?.status && d.status !== where.status) return false;
+          if (where?.id?.not && d.id === where.id.not) return false;
+          return true;
+        }) || null;
+      }),
+      findMany: jest.fn(async ({ where }: any) => {
+        return store.deployments.filter(d => {
+          if (where?.serviceId && d.serviceId !== where.serviceId) return false;
+          if (where?.environmentId && d.environmentId !== where.environmentId) return false;
+          return true;
+        }).map(d => ({
+          ...d,
+          service: store.services.find(s => s.id === d.serviceId) || null,
+          environment: store.environments.find(e => e.id === d.environmentId) || null,
+          user: store.users.find(u => u.id === d.triggeredBy) || null,
+          events: store.deploymentEvents.filter(ev => ev.deploymentId === d.id),
+        }));
+      }),
+      count: jest.fn(async () => store.deployments.length),
+      create: jest.fn(async ({ data }: any) => {
+        const item = {
+          id: data.id || randomUUID(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          status: 'requested',
+          ...data,
+        };
+        store.deployments.push(item);
+        return {
+          ...item,
+          service: store.services.find(s => s.id === item.serviceId) || null,
+          environment: store.environments.find(e => e.id === item.environmentId) || null,
+          user: store.users.find(u => u.id === item.triggeredBy) || null,
+        };
+      }),
+      update: jest.fn(async ({ where, data }: any) => {
+        const item = store.deployments.find(d => d.id === where.id);
+        if (item) Object.assign(item, { ...data, updatedAt: new Date() });
+        return item;
+      }),
+    },
+
+    deploymentEvent: {
+      create: jest.fn(async ({ data }: any) => {
+        const item = { id: randomUUID(), createdAt: new Date(), ...data };
+        store.deploymentEvents.push(item);
+        return item;
+      }),
+    },
+
+    pipelineRun: {
+      upsert: jest.fn(async ({ where, create, update }: any) => {
+        let item = store.pipelineRuns.find(p => p.deploymentId === where.deploymentId);
+        if (item) {
+          Object.assign(item, { ...update, updatedAt: new Date() });
+        } else {
+          item = { id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), ...create };
+          store.pipelineRuns.push(item);
+        }
+        return item;
       }),
     },
 

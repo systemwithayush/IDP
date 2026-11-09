@@ -150,3 +150,23 @@ servicesRouter.post('/:id/environments', requireServiceAccess('write'), async (r
     next(error);
   }
 });
+
+/**
+ * GET /api/v1/services/:id/deployments
+ */
+servicesRouter.get('/:id/deployments', requireServiceAccess('read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deployments = await prisma.deployment.findMany({
+      where: { serviceId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        environment: true,
+        user: { select: { id: true, email: true } },
+        events: { take: 1, orderBy: { createdAt: 'desc' } },
+      },
+    });
+    res.status(200).json({ data: deployments });
+  } catch (error) {
+    next(error);
+  }
+});

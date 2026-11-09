@@ -13,6 +13,8 @@ import { auditRouter } from './modules/audit/audit.routes.js';
 import { servicesRouter } from './modules/services/services.routes.js';
 import { environmentsRouter } from './modules/environments/environments.routes.js';
 import { templatesRouter } from './modules/templates/templates.routes.js';
+import { deploymentsRouter } from './modules/deployments/deployments.routes.js';
+import { webhooksRouter } from './modules/webhooks/webhooks.routes.js';
 
 export const app = express();
 
@@ -78,6 +80,8 @@ app.use('/api/v1/audit-log', auditRouter);
 app.use('/api/v1/services', servicesRouter);
 app.use('/api/v1/environments', environmentsRouter);
 app.use('/api/v1/templates', templatesRouter);
+app.use('/api/v1/webhooks', webhooksRouter);
+app.use('/api/v1/deployments', deploymentsRouter);
 
 // 404 Handler
 app.use((req: Request, res: Response) => {

@@ -4,8 +4,9 @@ import { app } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { prisma } from './prisma.js';
+import { setSocketServer } from './socket.js';
 
-const server = http.createServer(app);
+export const server = http.createServer(app);
 
 export const io = new SocketIOServer(server, {
   cors: {
@@ -13,6 +14,8 @@ export const io = new SocketIOServer(server, {
     credentials: true,
   },
 });
+
+setSocketServer(io);
 
 io.on('connection', (socket) => {
   logger.info({ socketId: socket.id }, 'Socket.io client connected');
@@ -27,19 +30,28 @@ io.on('connection', (socket) => {
   });
 });
 
-const serverInstance = server.listen(env.PORT, () => {
-  logger.info(`🚀 IDP API Server running on port ${env.PORT} in ${env.NODE_ENV} mode`);
-});
+let serverInstance: http.Server | null = null;
+
+if (process.env.NODE_ENV !== 'test') {
+  serverInstance = server.listen(env.PORT, () => {
+    logger.info(`🚀 IDP API Server running on port ${env.PORT} in ${env.NODE_ENV} mode`);
+  });
+}
 
 // Graceful shutdown
 const shutdown = async (signal: string) => {
   logger.info(`Received ${signal}, initiating graceful shutdown...`);
-  serverInstance.close(async () => {
-    logger.info('HTTP server closed.');
+  if (serverInstance) {
+    serverInstance.close(async () => {
+      logger.info('HTTP server closed.');
+      await prisma.$disconnect();
+      logger.info('Database connection closed.');
+      process.exit(0);
+    });
+  } else {
     await prisma.$disconnect();
-    logger.info('Database connection closed.');
     process.exit(0);
-  });
+  }
 
   setTimeout(() => {
     logger.error('Could not close connections in time, forcefully shutting down');
@@ -49,4 +61,3 @@ const shutdown = async (signal: string) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
-
