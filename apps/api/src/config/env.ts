@@ -30,6 +30,12 @@ const envSchema = z.object({
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_WEBHOOK_SECRET: z.string().default('default_dev_webhook_secret'),
   GITHUB_OWNER: z.string().default('systemwithayush'),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  CHAT_WEBHOOK_URL: z.string().optional(),
   OPENAI_API_KEY: z.string().default('mock-key'),
 });
 

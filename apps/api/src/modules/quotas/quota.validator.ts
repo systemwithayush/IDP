@@ -1,4 +1,5 @@
 import { prisma } from '../../prisma.js';
+import { notificationService } from '../notifications/notification.service.js';
 
 export class QuotaValidationError extends Error {
   status = 422;
@@ -87,6 +88,31 @@ export class QuotaValidator {
 
     const projectedCpuM = currentTotalCpuM + additionalCpuM;
     const projectedMemoryMb = currentTotalMemoryMb + additionalMemoryMb;
+
+    // Quota warning alert at >= 80%
+    const cpuPct = (projectedCpuM / quota.maxCpuMillicores) * 100;
+    if (cpuPct >= 80 && cpuPct <= 100) {
+      notificationService.sendQuotaWarning({
+        toEmail: 'team-leads@idp.internal',
+        teamName: params.teamId,
+        resourceType: 'CPU',
+        percentUsed: cpuPct,
+        currentUsage: projectedCpuM,
+        limit: quota.maxCpuMillicores,
+      }).catch(() => {});
+    }
+
+    const memPct = (projectedMemoryMb / quota.maxMemoryMb) * 100;
+    if (memPct >= 80 && memPct <= 100) {
+      notificationService.sendQuotaWarning({
+        toEmail: 'team-leads@idp.internal',
+        teamName: params.teamId,
+        resourceType: 'Memory',
+        percentUsed: memPct,
+        currentUsage: projectedMemoryMb,
+        limit: quota.maxMemoryMb,
+      }).catch(() => {});
+    }
 
     if (projectedCpuM > quota.maxCpuMillicores) {
       throw new QuotaValidationError(

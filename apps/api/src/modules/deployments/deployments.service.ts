@@ -8,6 +8,7 @@ import { logger } from '../../utils/logger.js';
 import { decryptSecret } from '../../utils/crypto.js';
 import { manifestBuilder } from '../k8s/manifest.builder.js';
 import { k8sService } from '../k8s/k8s.service.js';
+import { notificationService } from '../notifications/notification.service.js';
 
 export interface CreateDeploymentParams {
   serviceId: string;
@@ -288,7 +289,11 @@ export class DeploymentsService {
   async deployToKubernetes(deploymentId: string) {
     const deployment = await prisma.deployment.findUnique({
       where: { id: deploymentId },
-      include: { service: { include: { team: true } }, environment: true },
+      include: {
+        service: { include: { team: true } },
+        environment: true,
+        user: { select: { id: true, email: true } },
+      },
     });
     if (!deployment) return null;
 
@@ -367,12 +372,27 @@ export class DeploymentsService {
           'ROLLOUT_PASSED',
           `Rollout passed: all ${rollout.replicasReady || 1} replica(s) ready`
         );
+        await notificationService.sendDeploymentSuccess({
+          toEmail: deployment.user?.email || 'dev@idp.internal',
+          serviceName: deployment.service.name,
+          envType: deployment.environment.type,
+          imageTag: deployment.imageTag,
+          deploymentId,
+        });
       } else {
         await this.transitionDeployment(
           deploymentId,
           'ROLLOUT_FAILED',
           `Rollout failed: ${rollout.reason}`
         );
+        await notificationService.sendDeploymentFailure({
+          toEmail: deployment.user?.email || 'dev@idp.internal',
+          serviceName: deployment.service.name,
+          envType: deployment.environment.type,
+          imageTag: deployment.imageTag,
+          deploymentId,
+          errorReason: rollout.reason,
+        });
         await this.handleRolloutFailure(deployment);
       }
     } catch (err: any) {
@@ -381,6 +401,14 @@ export class DeploymentsService {
         'FAIL',
         `Kubernetes deployment error: ${err.message}`
       );
+      await notificationService.sendDeploymentFailure({
+        toEmail: deployment.user?.email || 'dev@idp.internal',
+        serviceName: deployment.service.name,
+        envType: deployment.environment.type,
+        imageTag: deployment.imageTag,
+        deploymentId,
+        errorReason: err.message,
+      });
       await this.handleRolloutFailure(deployment);
     }
 

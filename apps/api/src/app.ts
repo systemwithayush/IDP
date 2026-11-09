@@ -15,6 +15,7 @@ import { environmentsRouter } from './modules/environments/environments.routes.j
 import { templatesRouter } from './modules/templates/templates.routes.js';
 import { deploymentsRouter } from './modules/deployments/deployments.routes.js';
 import { webhooksRouter } from './modules/webhooks/webhooks.routes.js';
+import { docsRouter } from './modules/docs/docs.routes.js';
 
 export const app = express();
 
@@ -72,6 +73,9 @@ app.get('/api/v1', (_req: Request, res: Response) => {
     docs: '/docs',
   });
 });
+
+// Documentation
+app.use('/docs', docsRouter);
 
 // Feature Routes
 app.use('/api/v1/auth', authRouter);
