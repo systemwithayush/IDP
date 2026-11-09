@@ -7,6 +7,10 @@ import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { ZodError } from 'zod';
 
+import { authRouter } from './modules/auth/auth.routes.js';
+import { teamsRouter } from './modules/teams/teams.routes.js';
+import { auditRouter } from './modules/audit/audit.routes.js';
+
 export const app = express();
 
 // Security middleware
@@ -63,6 +67,11 @@ app.get('/api/v1', (_req: Request, res: Response) => {
     docs: '/docs',
   });
 });
+
+// Feature Routes
+app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/teams', teamsRouter);
+app.use('/api/v1/audit-log', auditRouter);
 
 // 404 Handler
 app.use((req: Request, res: Response) => {
