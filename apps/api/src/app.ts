@@ -10,6 +10,9 @@ import { ZodError } from 'zod';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { teamsRouter } from './modules/teams/teams.routes.js';
 import { auditRouter } from './modules/audit/audit.routes.js';
+import { servicesRouter } from './modules/services/services.routes.js';
+import { environmentsRouter } from './modules/environments/environments.routes.js';
+import { templatesRouter } from './modules/templates/templates.routes.js';
 
 export const app = express();
 
@@ -72,6 +75,9 @@ app.get('/api/v1', (_req: Request, res: Response) => {
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/teams', teamsRouter);
 app.use('/api/v1/audit-log', auditRouter);
+app.use('/api/v1/services', servicesRouter);
+app.use('/api/v1/environments', environmentsRouter);
+app.use('/api/v1/templates', templatesRouter);
 
 // 404 Handler
 app.use((req: Request, res: Response) => {

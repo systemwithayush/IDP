@@ -7,6 +7,8 @@ export interface InMemoryStore {
   resourceQuotas: any[];
   services: any[];
   environments: any[];
+  envVariables: any[];
+  goldenPathTemplates: any[];
   auditLogs: any[];
 }
 
@@ -17,6 +19,8 @@ export function createPrismaMock() {
     resourceQuotas: [],
     services: [],
     environments: [],
+    envVariables: [],
+    goldenPathTemplates: [],
     auditLogs: [],
   };
 
@@ -113,6 +117,9 @@ export function createPrismaMock() {
     },
 
     resourceQuota: {
+      findUnique: jest.fn(async ({ where }: any) => {
+        return store.resourceQuotas.find(q => q.teamId === where.teamId) || null;
+      }),
       create: jest.fn(async ({ data }: any) => {
         const item = { id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), ...data };
         store.resourceQuotas.push(item);
@@ -122,11 +129,48 @@ export function createPrismaMock() {
 
     service: {
       findUnique: jest.fn(async ({ where }: any) => {
-        return store.services.find(s => s.id === where.id || s.name === where.name) || null;
+        const s = store.services.find(s => s.id === where.id || s.name === where.name);
+        if (!s) return null;
+        return {
+          ...s,
+          team: store.teams.find(t => t.id === s.teamId) || null,
+          owner: store.users.find(u => u.id === s.ownerId) || null,
+          template: store.goldenPathTemplates.find(tpl => tpl.id === s.templateId) || null,
+          environments: store.environments.filter(e => e.serviceId === s.id),
+        };
+      }),
+      findMany: jest.fn(async ({ where }: any) => {
+        return store.services.filter(s => {
+          if (where?.teamId && s.teamId !== where.teamId) return false;
+          if (where?.stack && s.stack !== where.stack) return false;
+          return true;
+        }).map(s => ({
+          ...s,
+          team: store.teams.find(t => t.id === s.teamId) || null,
+          owner: store.users.find(u => u.id === s.ownerId) || null,
+          template: store.goldenPathTemplates.find(tpl => tpl.id === s.templateId) || null,
+          environments: store.environments.filter(e => e.serviceId === s.id),
+        }));
+      }),
+      count: jest.fn(async ({ where }: any) => {
+        return store.services.filter(s => {
+          if (where?.teamId && s.teamId !== where.teamId) return false;
+          return true;
+        }).length;
       }),
       create: jest.fn(async ({ data }: any) => {
         const item = { id: data.id || randomUUID(), createdAt: new Date(), updatedAt: new Date(), ...data };
         store.services.push(item);
+        return item;
+      }),
+      update: jest.fn(async ({ where, data }: any) => {
+        const item = store.services.find(s => s.id === where.id);
+        if (item) Object.assign(item, data);
+        return item;
+      }),
+      delete: jest.fn(async ({ where }: any) => {
+        const item = store.services.find(s => s.id === where.id);
+        store.services = store.services.filter(s => s.id !== where.id);
         return item;
       }),
       deleteMany: jest.fn(async ({ where }: any) => {
@@ -137,6 +181,56 @@ export function createPrismaMock() {
           store.services = [];
         }
         return { count: initial - store.services.length };
+      }),
+    },
+
+    environment: {
+      findUnique: jest.fn(async ({ where }: any) => {
+        const e = store.environments.find(e => e.id === where.id);
+        if (!e) return null;
+        return {
+          ...e,
+          service: store.services.find(s => s.id === e.serviceId) || null,
+        };
+      }),
+      findMany: jest.fn(async ({ where }: any) => {
+        return store.environments.filter(e => {
+          if (where?.serviceId && e.serviceId !== where.serviceId) return false;
+          return true;
+        }).map(e => ({
+          ...e,
+          _count: { envVariables: 0, deployments: 0 },
+        }));
+      }),
+      create: jest.fn(async ({ data }: any) => {
+        const item = { id: data.id || randomUUID(), createdAt: new Date(), updatedAt: new Date(), ...data };
+        store.environments.push(item);
+        return item;
+      }),
+    },
+
+    envVariable: {
+      findMany: jest.fn(async ({ where }: any) => {
+        return store.envVariables.filter(v => v.environmentId === where.environmentId);
+      }),
+      upsert: jest.fn(async ({ where, create, update }: any) => {
+        let item = store.envVariables.find(
+          v => v.environmentId === where.environmentId_key.environmentId && v.key === where.environmentId_key.key
+        );
+        if (item) {
+          Object.assign(item, { ...update, updatedAt: new Date() });
+        } else {
+          item = { id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), ...create };
+          store.envVariables.push(item);
+        }
+        return item;
+      }),
+    },
+
+    goldenPathTemplate: {
+      findMany: jest.fn(async () => store.goldenPathTemplates),
+      findUnique: jest.fn(async ({ where }: any) => {
+        return store.goldenPathTemplates.find(t => t.id === where.id) || null;
       }),
     },
 

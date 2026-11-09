@@ -161,3 +161,4 @@ authRouter.get('/me', authenticateJWT, async (req: Request, res: Response, next:
     next(error);
   }
 });
+
