@@ -22,14 +22,14 @@ The platform architecture follows cloud-native principles:
 │   ├── api/                     # Express REST API + Socket.io server
 │   │   ├── prisma/              # Prisma schema & seed migrations
 │   │   ├── src/config/          # Zod env validation
-│   │   ├── src/modules/         # Feature modules (auth, services, deployments)
+│   │   ├── src/modules/         # Feature modules (auth, services, deployments, ai, terraform)
 │   │   └── src/utils/           # Pino logger, crypto helpers
 │   └── web/                     # React 18 + Vite + Tailwind frontend portal
 ├── packages/
 │   └── shared/                  # Common TypeScript interfaces & Zod validation schemas
-├── docs/                        # Architecture, Decision logs, and ER diagrams
-├── infra/                       # Docker Compose, Kind configs, K8s RBAC
-└── templates/                   # Golden path templates (Express, React, FastAPI)
+├── docs/                        # Architecture, Decision logs, ER diagrams, Demo walkthrough
+├── infra/                       # Docker Compose, Kind configs, K8s RBAC, kind-up scripts
+└── templates/                   # Golden path templates (Express, React, FastAPI, GH Actions)
 ```
 
 ---
@@ -46,19 +46,68 @@ The platform architecture follows cloud-native principles:
 | **Realtime** | Socket.io | Bidirectional pub/sub with room isolation (`deployment:<id>`), auto-reconnection, handshake auth. |
 | **CI / CD** | GitHub Actions | Standardized `workflow_dispatch` decoupled execution without mounting Docker sockets on the API server. |
 | **Orchestration** | Kubernetes (`@kubernetes/client-node`) | Industry-standard declarative container orchestration with namespace-level RBAC isolation. |
+| **IaC Generator** | Terraform HCL Engine | Generates multi-file, idiomatic Terraform modules for GCP (Cloud SQL, GCS) and AWS (RDS, S3). |
+| **Advisory Engine** | Grounded AI (OpenAI JSON Schema) | Analyzes Prometheus/K8s metrics, enforces strict schema adherence and team quota verification. |
 
 ---
 
-## 4. Design Decisions & Tradeoffs
+## 4. Key Architectural Subsystems
 
-### 1. Why GitHub Actions builds images instead of the API
-The IDP API must never mount `/var/run/docker.sock` or invoke `docker build` directly on the host server. Mounting the Docker socket compromises host security by effectively granting root access. Delegating image builds to GitHub Actions offloads compute-heavy compiler/container tasks to ephemeral CI runners, preserves sandbox isolation, and produces signed container images in GHCR with auditable commit SHAs.
+### 4.1 Deterministic Deployment State Machine
 
-### 2. Direct Apply vs GitOps (and ArgoCD integration)
-In this implementation, the IDP directly applies Kubernetes manifests (`Deployment`, `Service`, `ConfigMap`, `Secret`) using `@kubernetes/client-node` with a scoped `ServiceAccount`. 
-- **Advantage**: Immediate feedback loops, real-time rollout telemetry, instantaneous automated rollbacks, and simpler developer onboarding.
-- **GitOps Evolution**: To adopt GitOps, the IDP manifest builder can commit generated manifests into an environment repository (e.g. `systemwithayush/idp-gitops-manifests`), where ArgoCD or Flux watches the repository and reconciles the desired state.
+```
+      +-------------+
+      |  requested  |
+      +------+------+
+             | (DISPATCH_BUILD)
+             v
+      +-------------+        (BUILD_FAILED)
+      |   building  | ------------------------+
+      +------+------+                         |
+             | (IMAGE_PUSHED)                 |
+             v                                |
+      +-------------+                         |
+      |    pushed   |                         |
+      +------+------+                         |
+             | (APPLY_K8S)                    |
+             v                                |
+      +-------------+                         |
+      |   applying  |                         |
+      +------+------+                         |
+             | (K8S_APPLIED)                  |
+             v                                |
+      +-------------+                         |
+      | rolling_out |                         |
+      +------+------+                         |
+             |                                |
+     +-------+-------+                        |
+     |               |                        |
+(ROLLOUT_OK)    (ROLLOUT_FAILED)              |
+     v               v                        |
++-----------+  +-------------+                |
+| succeeded |  | rolled_back | <--------------+
++-----------+  +-------------+
+```
 
-### 3. Advisory AI with Mandatory Human Approval
-AI-generated infrastructure recommendations (right-sizing CPU/Memory and replica recommendations) are advisory. LLMs cannot replace operational context. All generated recommendations undergo strict JSON schema validation, quota boundary validation, and must be reviewed and approved by an authorized Team Lead or Admin before mutating environment configurations.
+Every state transition:
+1. Validates allowed edge transitions via pure state machine function.
+2. Appends an immutable row in `deployment_events`.
+3. Broadcasts the state update to Socket.io room `deployment:<id>`.
+4. Triggers chat/email notifications on failure or rollback.
 
+### 4.2 Zero-Secret Policy & Envelope Encryption
+- Secrets are encrypted at application level using **AES-256-GCM** with a distinct 12-byte initialization vector (`iv`) and 16-byte authentication tag per variable.
+- Plaintext values are **never** logged, never exposed in standard GET requests (`••••••••••••`), and never stored unencrypted in MySQL.
+- Only users with role `lead` or `admin` in the owning team can invoke `/secrets/reveal`, which writes a mandatory tamper-evident record into `audit_log`.
+
+### 4.3 Grounded AI Advisory Pipeline
+1. Metrics Collector samples CPU (millicores) and Memory (MB) utilization over a 7-day P95 window from Kubernetes metrics-server.
+2. Structured prompt sent to OpenAI with strict JSON Schema output enforcement (`response_format: { type: "json_schema" }`).
+3. If output fails Zod parsing, automatic schema retry prompt is dispatched.
+4. Recommendation is post-validated against team resource quotas and sanity floors.
+5. Reviewer approves or rejects via `/api/v1/recommendations/:id/approve` or `/reject`.
+
+### 4.4 Golden Path Scaffolding & Terraform Generator
+- Golden Path templates (`node-express`, `python-fastapi`, `react-static`) provide standardized Dockerfiles, Kubernetes manifests, and GitHub Actions deploy workflows.
+- Scaffolding endpoint `/api/v1/templates/:id/scaffold` performs token replacement, validates team quotas, auto-registers the service, and provisions the initial environment.
+- Terraform Generator produces multi-file infrastructure as code (`versions.tf`, `variables.tf`, `main.tf`, `database.tf`, `storage.tf`, `outputs.tf`) ready for cloud deployment.

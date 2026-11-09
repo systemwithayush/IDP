@@ -17,6 +17,7 @@ import { deploymentsRouter } from './modules/deployments/deployments.routes.js';
 import { webhooksRouter } from './modules/webhooks/webhooks.routes.js';
 import { docsRouter } from './modules/docs/docs.routes.js';
 import { aiRouter } from './modules/ai/ai.routes.js';
+import { terraformRouter } from './modules/terraform/terraform.routes.js';
 
 export const app = express();
 
@@ -82,6 +83,7 @@ app.use('/docs', docsRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/teams', teamsRouter);
 app.use('/api/v1/audit-log', auditRouter);
+app.use('/api/v1/services', terraformRouter);
 app.use('/api/v1/services', servicesRouter);
 app.use('/api/v1/environments', environmentsRouter);
 app.use('/api/v1/templates', templatesRouter);

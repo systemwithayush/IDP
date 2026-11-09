@@ -14,6 +14,7 @@ export interface InMemoryStore {
   pipelineRuns: any[];
   auditLogs: any[];
   aiRecommendations: any[];
+  terraformModules: any[];
 }
 
 export function createPrismaMock() {
@@ -30,6 +31,7 @@ export function createPrismaMock() {
     pipelineRuns: [],
     auditLogs: [],
     aiRecommendations: [],
+    terraformModules: [],
   };
 
   return {
@@ -402,6 +404,51 @@ export function createPrismaMock() {
       update: jest.fn(async ({ where, data }: any) => {
         const item = store.aiRecommendations.find(r => r.id === where.id);
         if (item) Object.assign(item, { ...data, updatedAt: new Date() });
+        return item;
+      }),
+    },
+
+    terraformModule: {
+      findFirst: jest.fn(async ({ where }: any) => {
+        const item = store.terraformModules.find(m => m.serviceId === where.serviceId);
+        if (!item) return null;
+        return {
+          ...item,
+          service: store.services.find(s => s.id === item.serviceId) || null,
+        };
+      }),
+      findUnique: jest.fn(async ({ where }: any) => {
+        const item = store.terraformModules.find(m => m.id === where.id || m.serviceId === where.serviceId);
+        if (!item) return null;
+        return {
+          ...item,
+          service: store.services.find(s => s.id === item.serviceId) || null,
+        };
+      }),
+      create: jest.fn(async ({ data }: any) => {
+        const item = {
+          id: data.id || randomUUID(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          validated: true,
+          ...data,
+        };
+        store.terraformModules.push(item);
+        return item;
+      }),
+      update: jest.fn(async ({ where, data }: any) => {
+        const item = store.terraformModules.find(m => m.id === where.id);
+        if (item) Object.assign(item, { ...data, updatedAt: new Date() });
+        return item;
+      }),
+      upsert: jest.fn(async ({ where, create, update }: any) => {
+        let item = store.terraformModules.find(m => m.serviceId === where.serviceId);
+        if (item) {
+          Object.assign(item, { ...update, updatedAt: new Date() });
+        } else {
+          item = { id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), validated: true, ...create };
+          store.terraformModules.push(item);
+        }
         return item;
       }),
     },

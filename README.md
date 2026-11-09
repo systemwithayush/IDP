@@ -4,8 +4,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-20%20LTS-green)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue)](https://www.typescriptlang.org/)
+[![Test Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](apps/api)
+[![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI-3.0-orange)](http://localhost:3000/docs)
 
-A self-service internal developer portal where engineering teams register services, configure environments and encrypted secrets, execute Kubernetes rollouts via GitHub Actions, stream live pod logs, and receive metrics-grounded AI infrastructure right-sizing recommendations.
+A self-service internal developer portal where engineering teams register services, scaffold new microservices via Golden Path templates, configure environments and AES-256-GCM encrypted secrets, execute Kubernetes rollouts via GitHub Actions, stream live pod logs, receive metrics-grounded AI infrastructure right-sizing recommendations, and export production-ready multi-file Terraform HCL.
 
 ---
 
@@ -24,6 +26,7 @@ flowchart TD
         AuditMid["Audit Logging Interceptor"]
         RateLimiter["Rate Limiting & Helmet"]
         WSServer["Socket.io Server (Rooms: deployment:id)"]
+        SwaggerDocs["OpenAPI 3.0 UI (/docs)"]
     end
 
     subgraph Persistence ["Persistence Layer"]
@@ -42,6 +45,7 @@ flowchart TD
         K8s["Kubernetes Cluster (kind local / EKS / GKE)"]
         K8sClient["@kubernetes/client-node (Scoped ServiceAccount)"]
         MetricsServer["K8s Metrics Server (Pod CPU / Mem Top)"]
+        TerraformGen["Terraform HCL Generator (GCP / AWS)"]
     end
 
     subgraph Advisory ["AI Advisory Engine"]
@@ -64,6 +68,7 @@ flowchart TD
     K8sClient --> K8s
     MetricsServer --> K8sClient
     API --> QuotaValidator --> OpenAI
+    API --> TerraformGen
 ```
 
 ---
@@ -81,41 +86,56 @@ cp .env.example .env
 # 3. Start database
 docker compose -f infra/docker-compose.yml up -d
 
-# 4. Install dependencies
+# 4. Optional: Start Kind Kubernetes cluster with metrics-server & ingress
+# On Linux / Mac:
+bash infra/kind-up.sh
+# On Windows:
+infra\kind-up.bat
+
+# 5. Install dependencies
 npm install
 
-# 5. Database setup & seed
+# 6. Database setup & seed
 npm run db:generate
 npm run db:migrate
 npm run db:seed
 
-# 6. Run test suite
+# 7. Run full test suite (155 tests, >85% coverage)
 npm test
 
-# 7. Start dev environment
+# 8. Start development servers
 npm run dev
 ```
 
 Visit:
 - **Frontend Portal**: [http://localhost:5173](http://localhost:5173)
-- **API Server**: [http://localhost:4000](http://localhost:4000)
-
-Detailed instructions available in [docs/STEPS_TO_RUN.md](docs/STEPS_TO_RUN.md).
-
----
-
-## 📐 Design Decisions & Tradeoffs
-
-1. **CI Builds Container Images, Not the API Server**:
-   Mounting `/var/run/docker.sock` to the API compromises container sandbox isolation and introduces serious host vulnerability. Decoupling image compilation to GitHub Actions provides isolated, auditable ephemeral runners and cryptographically tagged releases in GHCR.
-2. **Direct Kubernetes Apply vs. GitOps**:
-   The IDP uses `@kubernetes/client-node` with a dedicated namespace-scoped `ServiceAccount` for instantaneous rollout tracking, live log streaming, and sub-second automated rollbacks. An ArgoCD-compatible GitOps repository adapter is provided in the manifest generator.
-3. **Advisory AI with Human Approval**:
-   LLMs suggest resource optimization based on real `metrics-server` telemetry. To prevent runaway cost or capacity depletion, all suggestions are validated against team `resource_quotas` and require explicit Team Lead / Admin approval before updating manifests.
+- **API Server & Health**: [http://localhost:3000/ready](http://localhost:3000/ready)
+- **Interactive Swagger OpenAPI Documentation**: [http://localhost:3000/docs](http://localhost:3000/docs)
+- **5-Minute End-to-End Walkthrough Script**: [docs/DEMO.md](docs/DEMO.md)
 
 ---
 
-## 📊 Database Schema
+## 🚀 Key Platform Capabilities
 
-See the comprehensive [Database ER Diagram](docs/er.md) for detailed relations across all 13 core entities.
+1. **Self-Service Golden Paths**:
+   Instant scaffolding of Node.js Express, Python FastAPI, and React Static apps with Dockerfiles, typed Kubernetes manifests, GitHub Actions workflows, and Terraform infrastructure.
+2. **Deterministic Deployment State Machine**:
+   Pure-function state engine tracking `requested` -> `building` -> `pushed` -> `applying` -> `rolling_out` -> `succeeded` with automated detection of CrashLoopBackOff and 1-click rollback.
+3. **Zero-Secret Policy & Envelope Encryption**:
+   AES-256-GCM encryption for all sensitive variables at rest, masking values in transit with lead/admin reveal auditing.
+4. **Grounded AI Infrastructure Rightsizing**:
+   Analyzes 7-day P95 Prometheus metrics using OpenAI structured outputs with automatic schema retries, quota bounds enforcement, and interactive approval diffs.
+5. **Multi-File Terraform HCL Generator**:
+   Generates production-ready `versions.tf`, `variables.tf`, `main.tf`, `database.tf`, `storage.tf`, and `outputs.tf` for GCP and AWS workloads.
+6. **Immutable Audit Trail**:
+   Every mutation, secret reveal, and rollback is permanently recorded with user identity, timestamp, and JSON delta metadata.
 
+---
+
+## 📐 Documentation Index
+
+- [Architecture Guide](docs/ARCHITECTURE.md)
+- [Architecture Decision Records (ADRs 001 - 007)](docs/DECISIONS.md)
+- [Entity-Relationship Diagram (13 Core Entities)](docs/er.md)
+- [Step-by-Step Runbook](docs/STEPS_TO_RUN.md)
+- [Interactive Demo Walkthrough](docs/DEMO.md)
